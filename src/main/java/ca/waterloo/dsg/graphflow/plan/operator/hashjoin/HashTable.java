@@ -1,5 +1,7 @@
 package ca.waterloo.dsg.graphflow.plan.operator.hashjoin;
 
+import lombok.var;
+
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;

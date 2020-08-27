@@ -3,6 +3,7 @@ package ca.waterloo.dsg.graphflow.query;
 import ca.waterloo.dsg.graphflow.storage.KeyStore;
 import lombok.Getter;
 import lombok.Setter;
+import lombok.var;
 
 import java.io.Serializable;
 import java.util.ArrayList;

@@ -4,6 +4,7 @@ import ca.waterloo.dsg.graphflow.plan.operator.Operator;
 import ca.waterloo.dsg.graphflow.query.QueryGraph;
 import ca.waterloo.dsg.graphflow.storage.Graph;
 import ca.waterloo.dsg.graphflow.storage.KeyStore;
+import lombok.var;
 
 /**
  * An base sink collecting the output results from the dataflow acting as a count(*).
@@ -85,13 +86,5 @@ public class Sink extends Operator {
         var sink = new Sink(outSubgraph);
         sink.prev = this.prev.copy(isThreadSafe);
         return sink;
-    }
-
-    /**
-     * @see Operator#copy(boolean)
-     */
-    @Override
-    public Sink copy() {
-        return new Sink(outSubgraph);
     }
 }

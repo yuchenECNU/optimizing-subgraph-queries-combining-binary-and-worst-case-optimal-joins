@@ -1,5 +1,7 @@
 package ca.waterloo.dsg.graphflow.util;
 
+import lombok.var;
+
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.File;

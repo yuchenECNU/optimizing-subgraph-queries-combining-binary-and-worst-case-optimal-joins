@@ -7,6 +7,7 @@ import ca.waterloo.dsg.graphflow.storage.Graph;
 import ca.waterloo.dsg.graphflow.storage.Graph.Direction;
 import ca.waterloo.dsg.graphflow.storage.KeyStore;
 import ca.waterloo.dsg.graphflow.storage.SortedAdjList;
+import lombok.var;
 
 import java.io.Serializable;
 import java.util.List;

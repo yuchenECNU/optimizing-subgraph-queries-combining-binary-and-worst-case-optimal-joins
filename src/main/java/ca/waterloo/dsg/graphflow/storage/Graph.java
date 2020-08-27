@@ -3,6 +3,7 @@ package ca.waterloo.dsg.graphflow.storage;
 import ca.waterloo.dsg.graphflow.util.IOUtils;
 import lombok.Getter;
 import lombok.Setter;
+import lombok.var;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 

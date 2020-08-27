@@ -1,5 +1,6 @@
 package ca.waterloo.dsg.graphflow.planner.catalog;
 
+import ca.waterloo.dsg.graphflow.plan.Plan;
 import ca.waterloo.dsg.graphflow.plan.operator.AdjListDescriptor;
 import ca.waterloo.dsg.graphflow.plan.operator.Operator;
 import ca.waterloo.dsg.graphflow.plan.operator.scan.ScanSampling;
@@ -14,6 +15,7 @@ import ca.waterloo.dsg.graphflow.storage.KeyStore;
 import ca.waterloo.dsg.graphflow.util.collection.SetUtils;
 import ca.waterloo.dsg.graphflow.util.container.Triple;
 import lombok.Getter;
+import lombok.var;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -50,11 +52,13 @@ public class CatalogPlans {
     private short numTypes;
     private short numLabels;
     private boolean isAdjListSortedByType;
+    @Getter private QueryGraphSet queryGraphsToExtend = new QueryGraphSet();
 
     private static final String[] QUERY_VERTICES = { "a", "b", "c", "d", "e", "f", "g" };
     private static Map<String, Integer> QUERY_VERTEX_TO_IDX_MAP;
-    @Getter List<ScanSampling> scans;
+    @Getter private List<Plan[]> queryPlansArrs;
     private boolean isDirected;
+
     @Getter private List<Triple<QueryGraph, List<AdjListDescriptor>, Short>> selectivityZero;
 
     /**
@@ -62,10 +66,10 @@ public class CatalogPlans {
      *
      * @param graph is the input data graph.
      * @param store is the labels and types key store.
-     * @param numSampledEdges is the number of edges sampled at scans.
-     * @param maxInputNumVertices is the maximum number of vertices in inSubgraphs extended.
+     * @param numThreads is the number of threads to use when executing.
      */
-    CatalogPlans(Graph graph, KeyStore store, int numSampledEdges, int maxInputNumVertices) {
+    CatalogPlans(Graph graph, KeyStore store, int numThreads, int numSampledEdges,
+        int maxInputNumVertices) {
         this.maxInputNumVertices = maxInputNumVertices;
         this.numSampledEdges = numSampledEdges;
         if (null == QUERY_VERTEX_TO_IDX_MAP) {
@@ -78,16 +82,37 @@ public class CatalogPlans {
         this.numTypes = store.getNextTypeKey();
         this.numLabels = store.getNextLabelKey();
         this.isAdjListSortedByType = graph.isAdjListSortedByType();
+        this.queryPlansArrs = new ArrayList<>();
         this.selectivityZero = new ArrayList<>();
+        List<ScanSampling> scans;
         if (store.getNextLabelKey() == 1 && store.getNextTypeKey() == 1 &&
                 graph.getNumEdges() > 1073741823) {
             scans = generateAllScansForLargeGraph(graph);
         } else {
             scans = generateAllScans(graph);
         }
+        for (var scan : scans) {
+            var noop = new Noop(scan.getOutSubgraph());
+            scan.setNext(noop);
+            noop.setPrev(scan);
+            noop.setOutQVertexToIdxMap(scan.getOutQVertexToIdxMap());
+            setNextOperators(graph, noop, queryGraphsToExtend);
+            var queryPlansArr = new Plan[numThreads];
+            queryPlansArr[0] = new Plan(scan);
+            for (var i = 1; i < numThreads; i++) {
+                var scanCopy = scan.copy();
+                var anotherNoop = new Noop(scanCopy.getOutSubgraph());
+                scanCopy.setNext(anotherNoop);
+                anotherNoop.setPrev(scanCopy);
+                anotherNoop.setOutQVertexToIdxMap(scanCopy.getOutQVertexToIdxMap());
+                setNextOperators(graph, anotherNoop, null /* queryGraphExtendedFrom */);
+                queryPlansArr[i] = new Plan(scanCopy);
+            }
+            queryPlansArrs.add(queryPlansArr);
+        }
     }
 
-    public void setNextOperators(Graph graph, Operator operator,
+    private void setNextOperators(Graph graph, Operator operator,
         QueryGraphSet queryGraphsToExtend) {
         var inSubgraph = operator.getOutSubgraph();
         if (null != queryGraphsToExtend && !queryGraphsToExtend.contains(inSubgraph)) {
@@ -181,9 +206,6 @@ public class CatalogPlans {
                 for (short toType = 0; toType < numTypes; toType++) {
                     var edgeKey = Graph.getEdgeKey(fromType, toType, label);
                     var numEdges = graph.getNumEdges(fromType, toType, label);
-                    if (numEdges == 0) {
-                        var x = 2;
-                    }
                     keyToEdgesMap.put(edgeKey, new int[numEdges * 2]);
                     keyToCurrIdx.put(edgeKey, 0);
                 }
@@ -200,7 +222,7 @@ public class CatalogPlans {
                         toType = labelOrType;
                         label = 0;
                     } else {
-                        toType = vertexTypes[neighbours[toIdx]];
+                        toType = vertexTypes[toIdx];
                         label = labelOrType;
                     }
                     var edgeKey = Graph.getEdgeKey(fromType, toType, label);
@@ -220,17 +242,11 @@ public class CatalogPlans {
                     var edgeKey = Graph.getEdgeKey(fromType, toType, label);
                     var actualNumEdges = graph.getNumEdges(fromType, toType, label);
                     if (actualNumEdges > 0) {
-                        var numEdgesToSample = (int) (numSampledEdges * (
-                            graph.getNumEdges(fromType, toType, label) /
-                                (double) graph.getNumEdges()));
-                        var scan = new ScanSampling(outSubgraph);
-                        if (isAdjListSortedByType && numEdgesToSample < 1) {
-                            if (actualNumEdges < 200) {
-                                numEdgesToSample = actualNumEdges;
-                            } else {
-                                numEdgesToSample = 50;
-                            }
+                        var numEdgesToSample = numSampledEdges;
+                        if (actualNumEdges < numEdgesToSample) {
+                            numEdgesToSample = actualNumEdges;
                         }
+                        var scan = new ScanSampling(outSubgraph);
                         scan.setEdgeIndicesToSample(keyToEdgesMap.get(edgeKey), numEdgesToSample);
                         scans.add(scan);
                     }

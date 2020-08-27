@@ -9,11 +9,11 @@ import ca.waterloo.dsg.graphflow.plan.operator.sink.Sink;
 import ca.waterloo.dsg.graphflow.planner.catalog.operator.IntersectCatalog;
 import ca.waterloo.dsg.graphflow.planner.catalog.operator.Noop;
 import ca.waterloo.dsg.graphflow.query.QueryGraph;
-import ca.waterloo.dsg.graphflow.query.QueryGraphSet;
 import ca.waterloo.dsg.graphflow.storage.Graph;
 import ca.waterloo.dsg.graphflow.storage.KeyStore;
 import ca.waterloo.dsg.graphflow.util.IOUtils;
 import lombok.Setter;
+import lombok.var;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -86,7 +86,7 @@ public class Catalog {
         for (var ALD : ALDs) {
             // Get each ALD icost by finding the largest subgraph (num vertices then num edges)
             // of queryGraph used in stats collection and also minimizing sampledIcost.
-            var numVertices = CatalogPlans.DEF_MAX_INPUT_NUM_VERTICES - 1;
+            var numVertices = maxInputNumVertices;
             while (numVertices >= 2) {
                 minICost = Double.MAX_VALUE;
                 var numEdgesMatched = 0;
@@ -140,7 +140,7 @@ public class Catalog {
     public double getSelectivity(QueryGraph inSubgraph, List<AdjListDescriptor> ALDs,
         short toType) {
         var approxSelectivity = Double.MAX_VALUE;
-        var numVertices = CatalogPlans.DEF_MAX_INPUT_NUM_VERTICES - 1;
+        var numVertices = maxInputNumVertices;
         while (numVertices >= 2) {
             var numALDsMatched = 0;
             for (var i = 0; i < inSubgraphs.size(); i++) {
@@ -154,14 +154,17 @@ public class Catalog {
                     if (newNumALDsMatched == 0 || newNumALDsMatched < numALDsMatched) {
                         continue;
                     }
-                    var strValue = getALDsAsStr(ALDs, vertexMapping, toType);
-                    var sampledSelectivity = this.sampledSelectivity.get(i).get(strValue);
+                    var sampledSelectivity = this.sampledSelectivity.get(i).get(getALDsAsStr(ALDs,
+                        vertexMapping, toType));
                     if (newNumALDsMatched > numALDsMatched ||
                             sampledSelectivity < approxSelectivity) {
                         numALDsMatched = newNumALDsMatched;
                         approxSelectivity = sampledSelectivity;
                     }
                 }
+            }
+            if (approxSelectivity < Double.MAX_VALUE) {
+                break;
             }
             numVertices--;
         }
@@ -220,84 +223,9 @@ public class Catalog {
         isAdjListSortedByType = graph.isAdjListSortedByType();
         sampledIcost = new HashMap<>();
         sampledSelectivity = new HashMap<>();
-        inSubgraphs = new ArrayList<>();
-        var plans = new CatalogPlans(graph, store, numSampledEdges, maxInputNumVertices);
-        var queryPlan = new Plan[numThreads];
-        var scans = plans.getScans();
-        var queryGraphsToExtend = new QueryGraphSet();
-        for (var scan : scans) {
-            var noop = new Noop(scan.getOutSubgraph());
-            scan.setNext(noop);
-            noop.setPrev(scan);
-            noop.setOutQVertexToIdxMap(scan.getOutQVertexToIdxMap());
-            plans.setNextOperators(graph, noop, queryGraphsToExtend);
-            queryPlan[0] = new Plan(scan);
-            for (var i = 1; i < numThreads; i++) {
-                queryPlan[i] = queryPlan[0].copyCatalogPlan();
-            }
-            setInputSubgraphs(queryGraphsToExtend.getQueryGraphSet());
-            init(graph, store, queryPlan);
-            execute(queryPlan);
-            logOutput(graph, queryPlan);
-        }
-        addZeroSelectivities(graph, plans);
-        elapsedTime = IOUtils.getElapsedTimeInMillis(startTime);
-        log(filename, numThreads, graph, store.getNextTypeKey(), store.getNextLabelKey());
-    }
-
-    private void init(Graph graph, KeyStore store, Plan[] queryPlanArr) {
-        for (var queryPlan : queryPlanArr) {
-            var probeTuple = new int[maxInputNumVertices + 1];
-            queryPlan.getScanSampling().init(probeTuple, graph, store);
-        }
-    }
-
-    /**
-     * Executes the {@link Plan}s.
-     */
-    public void execute(Plan[] queryPlanArr) throws InterruptedException {
-        if (queryPlanArr.length > 1) {
-            var threads = new Thread[queryPlanArr.length];
-            for (var i = 0; i < threads.length; i++) {
-                var sink = queryPlanArr[i].getSink();
-                threads[i] = new Thread(() -> {
-                    try { sink.execute(); } catch (LimitExceededException e) {/* nada. */}
-                });
-            }
-            for (var thread : threads) {
-                thread.start();
-            }
-            for (var thread : threads) {
-                thread.join();
-            }
-        } else {
-            var sink = queryPlanArr[0].getSink();
-            try { sink.execute(); } catch (LimitExceededException e) {/* nada. */}
-        }
-    }
-
-    private void logOutput(Graph graph, Plan[] queryPlanArr) {
-        var operator = queryPlanArr[0].getSink().previous[0];
-        while (!(operator instanceof ScanSampling)) {
-            operator = operator.getPrev();
-        }
-        operator = operator.getNext(0); /* first noop */
-        var other = new Operator[queryPlanArr.length - 1];
-        for (var i = 1; i < queryPlanArr.length; i++) {
-            other[i - 1] = queryPlanArr[i].getSink().previous[0];
-            while (!(other[i - 1] instanceof ScanSampling)) {
-                other[i - 1] = other[i - 1].getPrev();
-            }
-            other[i - 1] = other[i - 1].getNext(0); /* first noop */
-        }
-        if (isAdjListSortedByType) {
-            addICostAndSelectivitySortedByType(operator, other, graph.isUndirected());
-        } else {
-            addICostAndSelectivity(operator, other, graph.isUndirected());
-        }
-    }
-
-    private void addZeroSelectivities(Graph graph, CatalogPlans plans) {
+        var plans = new CatalogPlans(graph, store, numThreads, numSampledEdges,
+            maxInputNumVertices);
+        setInputSubgraphs(plans.getQueryGraphsToExtend().getQueryGraphSet());
         var selectivityZero = plans.getSelectivityZero();
         for (var select : selectivityZero) {
             var subgraphIdx = getSubgraphIdx(select.a);
@@ -324,9 +252,64 @@ public class Catalog {
                 ALDsAsStrList.add(ALDsStr);
             }
             for (var ALDsAsStr : ALDsAsStrList) {
-                sampledSelectivity.get(subgraphIdx).put(ALDsAsStr + "~" + select.c,
-                    0.00 /* selectivity */);
+                sampledSelectivity.get(subgraphIdx).put(ALDsAsStr + "~" + select.c, 0.00);
             }
+        }
+        for (var queryPlanArr : plans.getQueryPlansArrs()) {
+            init(graph, store, queryPlanArr);
+            execute(queryPlanArr);
+            addICostAndSelectivity(graph, queryPlanArr);
+        }
+        elapsedTime = IOUtils.getElapsedTimeInMillis(startTime);
+        log(filename, numThreads, graph, store.getNextTypeKey(), store.getNextLabelKey());
+    }
+
+    private void init(Graph graph, KeyStore store, Plan[] queryPlanArr) {
+        for (var queryPlan : queryPlanArr) {
+            var probeTuple = new int[maxInputNumVertices + 1];
+            queryPlan.getScanSampling().init(probeTuple, graph, store);
+        }
+    }
+
+    private void execute(Plan[] queryPlanArr) throws InterruptedException {
+        if (queryPlanArr.length > 1) {
+            var threads = new Thread[queryPlanArr.length];
+            for (var i = 0; i < threads.length; i++) {
+                var sink = queryPlanArr[i].getSink();
+                threads[i] = new Thread(() -> {
+                    try { sink.execute(); } catch (LimitExceededException e) {/* nada. */}
+                });
+            }
+            for (var thread : threads) {
+                thread.start();
+            }
+            for (var thread : threads) {
+                thread.join();
+            }
+        } else {
+            var sink = queryPlanArr[0].getSink();
+            try { sink.execute(); } catch (LimitExceededException e) {/* nada. */}
+        }
+    }
+
+    private void addICostAndSelectivity(Graph graph, Plan[] queryPlanArr) {
+        var operator = queryPlanArr[0].getSink().previous[0];
+        while (!(operator instanceof ScanSampling)) {
+            operator = operator.getPrev();
+        }
+        operator = operator.getNext(0); /* first noop */
+        var other = new Operator[queryPlanArr.length - 1];
+        for (var i = 1; i < queryPlanArr.length; i++) {
+            other[i - 1] = queryPlanArr[i].getSink().previous[0];
+            while (!(other[i - 1] instanceof ScanSampling)) {
+                other[i - 1] = other[i - 1].getPrev();
+            }
+            other[i - 1] = other[i - 1].getNext(0); /* first noop */
+        }
+        if (isAdjListSortedByType) {
+            addICostAndSelectivitySortedByType(operator, other, graph.isUndirected());
+        } else {
+            addICostAndSelectivity(operator, other, graph.isUndirected());
         }
     }
 
@@ -423,10 +406,9 @@ public class Catalog {
         var next = operator.getNext();
         for (var i = 0; i < next.length; i++) {
             var intersect = (IntersectCatalog) next[i];
-            var ALDs = intersect.getALDs();
             var toType = intersect.getToType();
             var ALDsAsStrList = new ArrayList<String>();
-            var ALDsStr = getALDsAsStr(ALDs, null, toType);
+            var ALDsStr = getALDsAsStr(intersect.getALDs(), null, toType);
             if (isUndirected) {
                 var splits = ALDsStr.split(", ");
                 var directionPatterns = CatalogPlans.generateDirectionPatterns(splits.length,
@@ -446,23 +428,6 @@ public class Catalog {
             } else {
                 ALDsAsStrList.add(ALDsStr);
             }
-            if (1 == ALDs.size()) {
-                var icost = next[i].getIcost();
-                for (var otherOperator : other) {
-                    icost += otherOperator.getNext(i).getIcost();
-                }
-                sampledIcost.putIfAbsent(subgraphIdx, new HashMap<>());
-                if (numInputTuples > 0) {
-                    for (var ALDsAsStr : ALDsAsStrList) {
-                        sampledIcost.get(subgraphIdx).putIfAbsent(ALDsAsStr, /*avg estimatedIcost*/
-                            icost / (double) numInputTuples);
-                    }
-                } else {
-                    for (var ALDsAsStr : ALDsAsStrList) {
-                        sampledIcost.get(subgraphIdx).putIfAbsent(ALDsAsStr, 0.0);
-                    }
-                }
-            }
             var selectivity = intersect.getNumOutTuples();
             for (var otherOperator : other) {
                 selectivity += otherOperator.getNext(i).getNumOutTuples();
@@ -481,9 +446,9 @@ public class Catalog {
             var noop = next[i].getNext()[0];
             var otherNoops = new Noop[other.length];
             for (var j = 0; j < otherNoops.length; j++) {
-                otherNoops[j] = (Noop) other[j].getNext(i).getNext()[0];
+                otherNoops[j] = (Noop) other[j].getNext(i).getNext(j);
             }
-            addICostAndSelectivitySortedByType(noop, otherNoops, isUndirected);
+            addICostAndSelectivity(noop, otherNoops, isUndirected);
         }
     }
 
@@ -497,6 +462,7 @@ public class Catalog {
     }
 
     private void setInputSubgraphs(Set<QueryGraph> inSubgraphs) {
+        this.inSubgraphs = new ArrayList<>();
         for (var inSubgraph : inSubgraphs) {
             var isUnique = true;
             for (var thisInSubgraph : this.inSubgraphs) {

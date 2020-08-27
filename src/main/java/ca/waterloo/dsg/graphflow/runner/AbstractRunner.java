@@ -1,6 +1,7 @@
 package ca.waterloo.dsg.graphflow.runner;
 
 import ca.waterloo.dsg.graphflow.util.IOUtils;
+import lombok.var;
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.CommandLineParser;
 import org.apache.commons.cli.DefaultParser;

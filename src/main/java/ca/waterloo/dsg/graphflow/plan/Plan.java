@@ -16,6 +16,7 @@ import ca.waterloo.dsg.graphflow.util.IOUtils;
 import ca.waterloo.dsg.graphflow.util.container.Triple;
 import lombok.Getter;
 import lombok.Setter;
+import lombok.var;
 
 import java.io.Serializable;
 import java.util.ArrayList;
@@ -207,6 +208,17 @@ public class Plan implements Serializable {
         }
         for (var operatorMetric : operatorMetrics) {
             strJoiner.add(String.format("%s", operatorMetric.a));     /* operator name */
+            /*
+            if (executed) {
+                if (!operatorMetric.a.contains("PROBE") && !operatorMetric.a.contains("HASH") &&
+                        !operatorMetric.a.contains("SCAN")) {
+                    strJoiner.add(String.format("%d", operatorMetric.b)); /* i-cost *
+                }
+                if (!operatorMetric.a.contains("HASH")) {
+                    strJoiner.add(String.format("%d", operatorMetric.c)); /* num out tuples *
+                }
+            }
+            */
         }
         return strJoiner.toString() + "\n";
     }
@@ -269,9 +281,5 @@ public class Plan implements Serializable {
      */
     public Plan copy() {
         return copy(false);
-    }
-
-    public Plan copyCatalogPlan() {
-        return new Plan(scanSampling.copy());
     }
 }

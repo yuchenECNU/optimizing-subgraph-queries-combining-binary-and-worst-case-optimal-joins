@@ -1,4 +1,7 @@
-# Optimizing Subgraph Queries by Combining Binary and Worst-Case Optimal Joins
+Graphflow Optimizers
+--------------------
+
+<img src="docs/img/graphflow.png" height="181px" weight="377">
 
 Table of Contents
 -----------------
@@ -9,10 +12,8 @@ Table of Contents
 
 Overview
 -----------------
-For an overview of our one-time subgraph matching optimizer, check our [paper](http://amine.io/papers/wco-optimizer-vldb19.pdf).    
-We study the problem of optimizing subgraph queries using the new worst-case optimal join plans. Worst-case optimal plans evaluate queries by matching one query vertex at a time using multi-way intersections. The core problem in optimizing worst-case optimal plans is to pick an ordering of the query vertices to match. We design a cost-based optimizer that (i) picks efficient query vertex orderings for worst-case optimal plans; and (ii) generates hybrid plans that mix traditional binary joins with worst-case optimal style multiway intersections. Our cost metric combines the cost of binary joins with a new cost metric called intersection-cost. The plan space of our optimizer contains plans that are not in the plan spaces based on tree decompositions from prior work.   
-
-DO NOT DISTRIBUTE. USE ONLY FOR ACADEMIC RESEARCH PURPOSES.   
+For an overview on Graphflow's one-time subgraph matching optimizer, check our [paper](http://amine.io/papers/wco-optimizer-vldb19.pdf).      
+Copyright © 2016-2020. DO NOT DISTRIBUTE. USE ONLY FOR ACADEMIC RESEARCH PURPOSES.   
 
 Build Steps
 -----------------
@@ -22,7 +23,7 @@ Build Steps
 Executing Queries
 -----------------
 ### Getting Started
-After building, run the following command in the project root directory:
+After building Graphflow, run the following command in the project root directory:
 ```
 . ./env.sh
 ```
@@ -32,7 +33,7 @@ cd scripts
 ```
 
 ### Dataset Preperation
-A dataset may consist of two files: (i) a vertex file, where IDs are from 0 to N and each line is of the format (ID,LABEL); and (ii) an edge file where each line is of the format (FROM,TO,LABEL). If the vertex file is omitted, all vertices are assigned the same label. We mainly used datasets from [SNAP](https://snap.stanford.edu/). The `serialize_dataset.py` script lets you load datasets from csv files and serialize them to the appropriate format for quick subsequent loading.
+A dataset may consist of two files: (i) a vertex file, where IDs are from 0 to N and each line is of the format (ID,LABEL); and (ii) an edge file where each line is of the format (FROM,TO,LABEL). If the vertex file is omitted, all vertices are assigned the same label. We mainly used datasets from [SNAP](https://snap.stanford.edu/). The `serialize_dataset.py` script lets you load datasets from csv files and serialize them to Graphflow format for quick subsequent loading.
 
 To load and serialize a dataset from a single edges files, run the following command in the `scripts` folder:
 ```
@@ -78,3 +79,4 @@ python3 execute_query.py "(a:person)-[friendof]->(b:person), (b:person)-[likes]-
 Contact
 -----------------
 [Amine Mhedhbi](http://amine.io/), amine.mhedhbi@uwaterloo.ca
+

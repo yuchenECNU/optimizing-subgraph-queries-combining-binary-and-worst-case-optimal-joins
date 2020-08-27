@@ -4,6 +4,7 @@ import ca.waterloo.dsg.graphflow.plan.Plan;
 import ca.waterloo.dsg.graphflow.plan.operator.Operator;
 import ca.waterloo.dsg.graphflow.query.QueryGraph;
 import ca.waterloo.dsg.graphflow.util.collection.SetUtils;
+import lombok.var;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -13,13 +14,13 @@ import java.util.Map;
 public class HashJoin {
 
     public static Plan make(QueryGraph outSubgraph, Plan buildPlan, Plan probePlan,
-        int nextHashJoinID, int numThreads) {
+        int nextHashJoinID) {
         return new Plan(make(outSubgraph, buildPlan.shallowCopy().getSubplans(),
-            probePlan.shallowCopy().getSubplans(), nextHashJoinID, numThreads));
+            probePlan.shallowCopy().getSubplans(), nextHashJoinID));
     }
 
     public static List<Operator> make(QueryGraph outSubgraph, List<Operator> buildSubplans,
-        List<Operator> probeSubplans, int nextHashJoinID, int numThreads) {
+        List<Operator> probeSubplans, int nextHashJoinID) {
         var preBuild = buildSubplans.get(buildSubplans.size() - 1);
         var preProbe = probeSubplans.get(probeSubplans.size() - 1);
         var joinQVertices = SetUtils.intersect(preBuild.getOutQVertices(),
@@ -41,7 +42,7 @@ public class HashJoin {
         var mapping = preBuild.getOutSubgraph().getIsomorphicMappingIfAny(
             preProbe.getOutSubgraph());
         Map<String, Integer> probeQVertexToIdxMap;
-        if (null != mapping && numThreads == 1) {
+        if (null != mapping) {
             probeQVertexToIdxMap = new HashMap<>();
             for (var queryVertex : buildQVertexToIdxMap.keySet()) {
                 var idx = buildQVertexToIdxMap.get(queryVertex);
@@ -73,7 +74,7 @@ public class HashJoin {
 
         Probe probe;
         var inSubgraph = preProbe.getOutSubgraph();
-        if (null != mapping && numThreads == 1) {
+        /* if (null != mapping && numThreads == 1) {
             if (probeIndices.length == 0) {
                 probe = new ProbeCartesian(outSubgraph, inSubgraph, joinQVertices, probeHashIdx,
                     hashedTupleLen, preProbe.getOutTupleLen(), outQVertexToIdxMap);
@@ -82,7 +83,7 @@ public class HashJoin {
                     probeHashIdx, probeIndices, buildIndices, hashedTupleLen, preProbe.
                     getOutTupleLen(), outQVertexToIdxMap);
             }
-        } else {
+        } else { */
             if (probeIndices.length == 0) {
                 probe = new Probe(outSubgraph, inSubgraph, joinQVertices, probeHashIdx,
                     hashedTupleLen, preProbe.getOutTupleLen(), outQVertexToIdxMap);
@@ -94,12 +95,11 @@ public class HashJoin {
             probe.setPrev(preProbe);
             preProbe.setNext(probe);
             probeSubplans.set(probeSubplans.size() - 1, probe);
-        }
+        // }
         probe.setID(nextHashJoinID);
-        probe.setLastRepeatedVertexIdx(probeQVertexToIdxMap.size() - 2);
         build.setProbingSubgraph(probe.getInSubgraph());
 
-        var subplans = new ArrayList<>(buildSubplans);
+        var subplans = new ArrayList<Operator>(buildSubplans);
         if (null != mapping) {
             subplans.add(probe);
         } else {
@@ -110,7 +110,7 @@ public class HashJoin {
 
     private static Map<String, Integer> computeOutVertexToIdxMap(List<String> joinVertices,
         Map<String, Integer> buildVertexToIdxMap, Map<String, Integer> probeVertexToIdxMap) {
-        var outVerticesToIdxMap = new HashMap<>(probeVertexToIdxMap);
+        var outVerticesToIdxMap = new HashMap<String, Integer>(probeVertexToIdxMap);
         var buildVertices = new String[buildVertexToIdxMap.size()];
         for (var buildVertex : buildVertexToIdxMap.keySet()) {
             buildVertices[buildVertexToIdxMap.get(buildVertex)] = buildVertex;

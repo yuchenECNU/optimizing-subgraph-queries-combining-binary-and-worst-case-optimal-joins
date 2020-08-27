@@ -10,6 +10,7 @@ import ca.waterloo.dsg.graphflow.storage.KeyStore;
 import ca.waterloo.dsg.graphflow.util.IOUtils;
 import ca.waterloo.dsg.graphflow.util.container.Triple;
 import lombok.Getter;
+import lombok.var;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -44,7 +45,7 @@ public class Workers {
     public Workers(Plan queryPlan, int numThreads) {
         queryPlans = new Plan[numThreads];
         if (numThreads == 1) {
-           queryPlans[0] = queryPlan;
+            queryPlans[0] = queryPlan;
         } else { // numThreads > 1
             for (int i = 0; i < numThreads; i++) {
                 queryPlans[i] = queryPlan.copy(true /* isThreadSafe */);
@@ -65,7 +66,8 @@ public class Workers {
             for (var i = 0; i < numSubplans; i++) {
                 var globalVertexIdxLimits = new VertexIdxLimits();
                 for (var plan : queryPlans) {
-                    var operator = plan.subplans.get(i);
+                    var lastOperator = plan.subplans.get(i);
+                    var operator = lastOperator;
                     while (null != operator.getPrev()) {
                         operator = operator.getPrev();
                     }
@@ -133,6 +135,15 @@ public class Workers {
         strJoiner.add(String.format("%d", intersectionCost));
         for (var operatorMetric : operatorMetrics) {
             strJoiner.add(String.format("%s", operatorMetric.a));     /* operator name */
+            /*
+            if (!operatorMetric.a.contains("PROBE") && !operatorMetric.a.contains("HASH") &&
+                !operatorMetric.a.contains("SCAN")) {
+                strJoiner.add(String.format("%d", operatorMetric.b)); /* i-cost *
+            }
+            if (!operatorMetric.a.contains("HASH")) {
+                strJoiner.add(String.format("%d", operatorMetric.c)); /* output tuples size *
+            }
+            */
         }
         return strJoiner.toString() + "\n";
     }
@@ -142,7 +153,7 @@ public class Workers {
         for (var queryPlan : queryPlans) {
             intersectionCost += queryPlan.getIcost();
             numIntermediateTuples += queryPlan.getNumIntermediateTuples();
-            numOutTuples += queryPlan.getLastOperator().getNumOutTuples();
+            numOutTuples += queryPlan.getSink().getNumOutTuples();
         }
         var queryPlan = queryPlans[0];
         for (var metric : queryPlan.getOperatorMetrics()) {

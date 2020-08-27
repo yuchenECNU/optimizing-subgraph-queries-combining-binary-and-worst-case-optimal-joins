@@ -7,6 +7,7 @@ import ca.waterloo.dsg.graphflow.storage.KeyStore;
 import ca.waterloo.dsg.graphflow.util.container.Triple;
 import lombok.Getter;
 import lombok.Setter;
+import lombok.var;
 
 import java.io.Serializable;
 import java.util.List;
@@ -23,7 +24,7 @@ public abstract class Operator implements Serializable {
     /**
      * Limit exception thrown for LIMIT queries.
      */
-    public static class LimitExceededException extends Exception {}
+    public class LimitExceededException extends Exception {}
 
     public static boolean CACHING_ENABLED = true;
 

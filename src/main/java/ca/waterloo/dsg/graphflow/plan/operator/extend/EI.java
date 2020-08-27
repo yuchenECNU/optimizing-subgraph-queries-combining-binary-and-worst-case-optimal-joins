@@ -10,8 +10,7 @@ import ca.waterloo.dsg.graphflow.storage.SortedAdjList;
 import ca.waterloo.dsg.graphflow.util.collection.MapUtils;
 import lombok.Getter;
 import lombok.Setter;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import lombok.var;
 
 import java.util.Arrays;
 import java.util.List;
@@ -22,8 +21,6 @@ import java.util.StringJoiner;
  * A base operator for {@link Extend} and {@link Intersect} operators.
  */
 public abstract class EI extends Operator {
-
-    protected static final Logger logger = LogManager.getLogger(Extend.class);
 
     /**
      * Enum type of the caching used.
@@ -39,7 +36,7 @@ public abstract class EI extends Operator {
     protected short[] vertexTypes;
 
     @Getter protected short toType;
-    @Getter protected String toQueryVertex;
+    @Getter String toQueryVertex;
     @Getter protected List<AdjListDescriptor> ALDs;
 
     @Setter protected int outIdx;
@@ -61,7 +58,6 @@ public abstract class EI extends Operator {
     protected Neighbours cachedNeighbours; /* used to cache intersections             */
 
     public static class Neighbours {
-
         public int[] Ids;
         public int startIdx, endIdx;
 
@@ -99,19 +95,20 @@ public abstract class EI extends Operator {
     /**
      * Constructs an {@link EI} operator.
      *
-     * @param toVertex is the query vertex the operator extends to.
+     * @param toQVertex is the query vertex the operator extends to.
      * @param toType is the type of the variable the operator extends to.
      * @param ALDs are the {@link AdjListDescriptor}s the prefixes extended to need to follow.
      * @param outSubgraph is the subgraph matched by the output tuples.
      * @param inSubgraph is the subgraph matched by the input tuples.
-     * @param outVertexToIdxMap The output variable to index in the prefixes map.
+     * @param outQVertexToIdxMap The output variable to index in the prefixes map.
      */
-    public static EI make(String toVertex, short toType, List<AdjListDescriptor> ALDs,
-        QueryGraph outSubgraph, QueryGraph inSubgraph, Map<String, Integer> outVertexToIdxMap) {
+    public static EI make(String toQVertex, short toType, List<AdjListDescriptor> ALDs,
+        QueryGraph outSubgraph, QueryGraph inSubgraph, Map<String, Integer> outQVertexToIdxMap) {
         if (1 == ALDs.size()) {
-            return new Extend(toVertex, toType, ALDs, outSubgraph, inSubgraph, outVertexToIdxMap);
+            return new Extend(toQVertex, toType, ALDs, outSubgraph, inSubgraph, outQVertexToIdxMap);
         } else {
-            return new Intersect(toVertex, toType, ALDs, outSubgraph, inSubgraph, outVertexToIdxMap);
+            return new Intersect(toQVertex, toType, ALDs, outSubgraph, inSubgraph,
+                outQVertexToIdxMap);
         }
     }
 
@@ -128,9 +125,6 @@ public abstract class EI extends Operator {
         setALDsAndAdjLists(graph, this.prev.getLastRepeatedVertexIdx());
         for (var nextOperator : next) {
             nextOperator.init(probeTuple, graph, store);
-        }
-        if (this instanceof Intersect && graph.isAdjListSortedByType()) {
-            toType = KeyStore.ANY;
         }
     }
 
@@ -164,7 +158,7 @@ public abstract class EI extends Operator {
     /**
      * Sets the sorted adjacency lists to intersect for faster lookups.
      */
-    protected void setALDsAndAdjLists(Graph graph, int lastRepeatedVertexIdx) {
+    private void setALDsAndAdjLists(Graph graph, int lastRepeatedVertexIdx) {
         var numCachedALDs = lastVertexIdsIntersected != null ? lastVertexIdsIntersected.length :
             ALDs.size();
         vertexIdxToCache = new int[numCachedALDs];
@@ -198,7 +192,7 @@ public abstract class EI extends Operator {
     /**
      * Initializes the extension data structured used when intersecting.
      */
-    protected void initExtensions(Graph graph) {
+    private void initExtensions(Graph graph) {
         if (cachingType == CachingType.NONE || cachingType == CachingType.FULL_CACHING) {
             outNeighbours = new Neighbours();
             if (1 == ALDs.size()) {

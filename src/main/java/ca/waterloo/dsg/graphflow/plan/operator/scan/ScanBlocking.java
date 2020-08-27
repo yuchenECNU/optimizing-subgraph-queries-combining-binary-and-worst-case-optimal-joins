@@ -5,8 +5,7 @@ import ca.waterloo.dsg.graphflow.query.QueryGraph;
 import ca.waterloo.dsg.graphflow.storage.Graph;
 import ca.waterloo.dsg.graphflow.storage.KeyStore;
 import lombok.Setter;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import lombok.var;
 
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -14,8 +13,6 @@ import java.util.concurrent.locks.ReentrantLock;
  * A multi-threaded implementation of the {@link Scan} operator .
  */
 public class ScanBlocking extends Scan {
-
-    protected static final Logger logger = LogManager.getLogger(ScanBlocking.class);
 
     public static int PARTITION_SIZE = 100;
 
@@ -45,14 +42,7 @@ public class ScanBlocking extends Scan {
      */
     @Override
     public void init(int[] probeTuple, Graph graph, KeyStore store) {
-        this.probeTuple = probeTuple;
-        this.vertexIds = graph.getVertexIds();
-        this.vertexTypes = graph.getVertexTypes();
-        this.fwdAdjList = graph.getFwdAdjLists();
-        if (graph.isAdjListSortedByType()) {
-            labelOrToType = toType;
-            toType = KeyStore.ANY;
-        }
+        super.init(probeTuple, graph, store);
         if (KeyStore.ANY != fromType) {
             currFromIdx = graph.getVertexTypeOffsets()[fromType];
             highestFromIdx = graph.getVertexTypeOffsets()[fromType + 1];
@@ -63,8 +53,8 @@ public class ScanBlocking extends Scan {
         currToIdx = fwdAdjList[vertexIds[currFromIdx]].getLabelOrTypeOffsets()[labelOrToType];
         highestToIdx = fwdAdjList[vertexIds[highestFromIdx - 1]].getLabelOrTypeOffsets()[
             labelOrToType + 1];
-        globalVerticesIdxLimits.fromVariableIndexLimit = currFromIdx;
-        globalVerticesIdxLimits.toVariableIndexLimit = currToIdx;
+        fromIdxLimit = currFromIdx;
+        toIdxLimit = currToIdx;
         for (var nextOperator : next) {
             nextOperator.init(probeTuple, graph, store);
         }
@@ -77,57 +67,70 @@ public class ScanBlocking extends Scan {
     public void execute() throws LimitExceededException {
         updateIndicesLimits();
         while (currFromIdx < highestFromIdx - 1 ||
-            (currFromIdx == highestFromIdx - 1 && currToIdx < highestToIdx)) { // - 1
+                (currFromIdx == highestFromIdx - 1 && currToIdx < highestToIdx - 1)) {
             if (currFromIdx == fromIdxLimit) {
                 produceNewEdges(currFromIdx, currToIdx, toIdxLimit);
             } else if (currFromIdx < fromIdxLimit) {
-                produceNewEdges(currFromIdx, currToIdx, fwdAdjList[vertexIds[currFromIdx]].
-                    getLabelOrTypeOffsets()[labelOrToType + 1]);
-                for (var fromIdx = currFromIdx + 1; fromIdx < fromIdxLimit; fromIdx++) {
-                    var adjList = fwdAdjList[vertexIds[fromIdx]];
-                    produceNewEdges(fromIdx, adjList.getLabelOrTypeOffsets()[labelOrToType],
-                        adjList.getLabelOrTypeOffsets()[labelOrToType + 1]);
-                }
-                produceNewEdges(fromIdxLimit, fwdAdjList[vertexIds[fromIdxLimit]].
-                    getLabelOrTypeOffsets()[labelOrToType], toIdxLimit);
+                var toVertexIdxLimit = fwdAdjList[currFromIdx].getLabelOrTypeOffsets()[
+                    labelOrToType + 1];
+                produceNewEdges(currFromIdx, currToIdx, toVertexIdxLimit);
+                produceNewEdges(/* startFromIdx: currFromIdx + 1, endFromIdx: fromIdxLimit */);
+                produceNewEdges(fromIdxLimit, fwdAdjList[fromIdxLimit].getLabelOrTypeOffsets()[
+                    labelOrToType], toIdxLimit);
             }
             updateIndicesLimits();
         }
     }
 
+    private void produceNewEdges() throws LimitExceededException {
+        int toVertexIdxStart, toVertexIdxLimit;
+        for (var fromIdx = currFromIdx + 1; fromIdx < fromIdxLimit; fromIdx++) {
+            probeTuple[0] = vertexIds[fromIdx];
+            toVertexIdxStart = fwdAdjList[fromIdx].getLabelOrTypeOffsets()[labelOrToType];
+            toVertexIdxLimit = fwdAdjList[fromIdx].getLabelOrTypeOffsets()[labelOrToType + 1];
+            for (int toIdx = toVertexIdxStart; toIdx < toVertexIdxLimit; toIdx++) {
+                probeTuple[1] = fwdAdjList[fromIdx].getNeighbourId(toIdx);
+                if (toType == KeyStore.ANY || vertexTypes[probeTuple[1]] == toType) {
+                    numOutTuples++;
+                    next[0].processNewTuple();
+                }
+            }
+        }
+    }
+
     private void produceNewEdges(int fromIdx, int startToIdx, int endToIdx)
         throws LimitExceededException {
-        probeTuple[0] = vertexIds[fromIdx];
         for (var toIdx = startToIdx; toIdx < endToIdx; toIdx++) {
-            probeTuple[1] = fwdAdjList[vertexIds[probeTuple[0]]].getNeighbourId(toIdx);
-            if (toType == KeyStore.ANY || vertexTypes[probeTuple[1]] == toType) {
-                numOutTuples++;
-                next[0].processNewTuple();
-            }
+            probeTuple[0] = vertexIds[fromIdx];
+            probeTuple[1] = fwdAdjList[fromIdx].getNeighbourId(toIdx);
+            numOutTuples++;
+            next[0].processNewTuple();
         }
     }
 
     private void updateIndicesLimits() {
         globalVerticesIdxLimits.lock.lock();
         try {
-            fromIdxLimit = currFromIdx = globalVerticesIdxLimits.fromVariableIndexLimit;
-            toIdxLimit   = currToIdx   = globalVerticesIdxLimits.toVariableIndexLimit;
+            currFromIdx = globalVerticesIdxLimits.fromVariableIndexLimit;
+            currToIdx = globalVerticesIdxLimits.toVariableIndexLimit;
+            fromIdxLimit = currFromIdx;
+            toIdxLimit = currToIdx;
             var numEdgesLeft = PARTITION_SIZE;
-            while (numEdgesLeft > 0 && (fromIdxLimit < highestFromIdx ||
-                (fromIdxLimit == highestFromIdx - 1 && toIdxLimit < highestToIdx))) {
-                var toLimit = fwdAdjList[vertexIds[fromIdxLimit]].getLabelOrTypeOffsets()[
-                    labelOrToType + 1];
-                if (toIdxLimit + numEdgesLeft < toLimit) {
-                    toIdxLimit += numEdgesLeft;
+            while (numEdgesLeft > 0 && (fromIdxLimit < highestFromIdx - 1 ||
+                (fromIdxLimit == highestFromIdx - 1 && toIdxLimit < highestToIdx - 1))) {
+                var toLimit = fwdAdjList[fromIdxLimit].getLabelOrTypeOffsets()[labelOrToType + 1];
+                if (toIdxLimit + numEdgesLeft <= toLimit - 1) {
+                    toIdxLimit += (numEdgesLeft - 1);
                     numEdgesLeft = 0;
-                } else { // toIdxLimit + numEdgesLeft >= toLimit
-                    numEdgesLeft -= (toLimit - toIdxLimit + 1);
+                } else { // currToIdx + numEdgesLeft > toLimit
+                    numEdgesLeft -= (toLimit - 1 - toIdxLimit);
                     toIdxLimit = toLimit;
                     if (fromIdxLimit == highestFromIdx - 1) {
                         break;
                     }
                     fromIdxLimit += 1;
-                    toIdxLimit = 0;
+                    toIdxLimit = fwdAdjList[fromIdxLimit].
+                        getLabelOrTypeOffsets()[labelOrToType];
                 }
             }
             globalVerticesIdxLimits.fromVariableIndexLimit = fromIdxLimit;
